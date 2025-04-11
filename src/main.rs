@@ -26,7 +26,7 @@ async fn simple_master_echo() -> Result<(), Box<dyn std::error::Error + Send + S
     Ok(())
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let args = args::Args::from_env();
     if let Err(e) = args {
