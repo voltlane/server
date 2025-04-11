@@ -1,0 +1,15 @@
+[package]
+name = "connection-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+futures = "0.3.31"
+tokio = { version = "1.44.1", features = ["full"] }
+
+[profile.release-with-debug]
+inherits = "release"
+opt-level = 3
+debug = true
+lto = true
+panic = "abort"
