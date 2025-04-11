@@ -5,7 +5,7 @@ use tokio::{
 
 pub fn configure_performance_tcp_socket(
     stream: &mut TcpStream,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     stream.set_nodelay(true)?;
     Ok(())
 }
@@ -17,7 +17,8 @@ pub async fn recv_size_prefixed<A: AsyncReadExt + std::marker::Unpin>(
     stream.read_exact(&mut size_buf).await?;
 
     let size = u32::from_be_bytes(size_buf) as usize;
-    let mut buf = vec![0u8; size];
+    let mut buf = Vec::with_capacity(size);
+    unsafe { buf.set_len(size) };
     stream.read_exact(&mut buf).await?;
 
     Ok(buf)
