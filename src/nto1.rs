@@ -95,7 +95,7 @@ impl Manager {
 
     pub fn add_client(&mut self, client: TcpStream) -> usize {
         // Add client to the list of clients
-        let id = self.client_ids.get_next_id();
+        let id = self.client_ids.next_id();
         self.clients.insert(id, ClientWrapper::new(id, client));
         id
     }

@@ -3,6 +3,8 @@ use tokio::{
     net::TcpStream,
 };
 
+use crate::Packet;
+
 pub fn configure_performance_tcp_socket(
     stream: &mut TcpStream,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -10,16 +12,30 @@ pub fn configure_performance_tcp_socket(
     Ok(())
 }
 
+async fn read_exact_cancel_safe<A: AsyncReadExt + std::marker::Unpin>(
+    stream: &mut A,
+    buf: &mut [u8],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut total_read = 0;
+    while total_read < buf.len() {
+        let bytes_read = stream.read(&mut buf[total_read..]).await?;
+        if bytes_read == 0 {
+            return Err("Connection closed or Eof".into());
+        }
+        total_read += bytes_read;
+    }
+    Ok(())
+}
+
 pub async fn recv_size_prefixed<A: AsyncReadExt + std::marker::Unpin>(
     stream: &mut A,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let mut size_buf = [0u8; 4];
-    stream.read_exact(&mut size_buf).await?;
+    read_exact_cancel_safe(stream, &mut size_buf).await?;
 
     let size = u32::from_be_bytes(size_buf) as usize;
-    let mut buf = Vec::with_capacity(size);
-    unsafe { buf.set_len(size) };
-    stream.read_exact(&mut buf).await?;
+    let mut buf = vec![0u8; size];
+    read_exact_cancel_safe(stream, &mut buf).await?;
 
     Ok(buf)
 }
@@ -36,7 +52,44 @@ pub async fn send_size_prefixed<A: AsyncWriteExt + std::marker::Unpin>(
         std::io::IoSlice::new(message),
     ];
 
-    stream.write_vectored(&bufs).await?;
+    let n = stream.write_vectored(&bufs).await?;
+    assert_eq!(n, size as usize + 4);
+
+    Ok(())
+}
+
+pub async fn recv_packet<A: AsyncReadExt + std::marker::Unpin>(
+    stream: &mut A,
+) -> Result<Packet, Box<dyn std::error::Error + Send + Sync>> {
+    let data = recv_size_prefixed(stream).await?;
+    if data.len() < 8 {
+        return Err("Packet too small".into());
+    }
+    let client_id = u64::from_be_bytes(data[0..8].try_into().unwrap());
+    let buf = data[8..].into();
+
+    Ok(Packet {
+        client_id,
+        data: buf,
+    })
+}
+
+pub async fn send_packet<A: AsyncWriteExt + std::marker::Unpin>(
+    stream: &mut A,
+    packet: Packet,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let size = packet.data.len() as u32 + 8;
+    let size_bytes = size.to_be_bytes();
+    let client_id_bytes = packet.client_id.to_be_bytes();
+
+    let bufs = [
+        std::io::IoSlice::new(&size_bytes),
+        std::io::IoSlice::new(&client_id_bytes),
+        std::io::IoSlice::new(&packet.data),
+    ];
+
+    let n = stream.write_vectored(&bufs).await?;
+    assert_eq!(n, size as usize + 4);
 
     Ok(())
 }
