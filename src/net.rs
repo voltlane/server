@@ -28,6 +28,21 @@ async fn read_exact_cancel_safe<A: AsyncReadExt + std::marker::Unpin>(
     Ok(())
 }
 
+async fn write_all_cancel_safe<A: AsyncWriteExt + std::marker::Unpin>(
+    stream: &mut A,
+    buf: &[u8],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut total_written = 0;
+    while total_written < buf.len() {
+        let bytes_written = stream.write(&buf[total_written..]).await?;
+        if bytes_written == 0 {
+            return Err("Connection closed or Eof".into());
+        }
+        total_written += bytes_written;
+    }
+    Ok(())
+}
+
 pub async fn recv_size_prefixed<A: AsyncReadExt + std::marker::Unpin>(
     stream: &mut A,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
@@ -47,15 +62,10 @@ pub async fn send_size_prefixed<A: AsyncWriteExt + std::marker::Unpin>(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let size = message.len() as u32;
     let size_bytes = size.to_be_bytes();
-
-    let bufs = [
-        std::io::IoSlice::new(&size_bytes),
-        std::io::IoSlice::new(message),
-    ];
-
-    let n = stream.write_vectored(&bufs).await?;
-    assert_eq!(n, size as usize + 4);
-
+    let mut combined_message = Vec::with_capacity(4 + message.len());
+    combined_message.extend_from_slice(&size_bytes);
+    combined_message.extend_from_slice(message);
+    write_all_cancel_safe(stream, &combined_message).await?;
     Ok(())
 }
 
@@ -83,14 +93,12 @@ pub async fn send_packet<A: AsyncWriteExt + std::marker::Unpin>(
     let size_bytes = size.to_be_bytes();
     let client_id_bytes = packet.client_id.to_be_bytes();
 
-    let bufs = [
-        std::io::IoSlice::new(&size_bytes),
-        std::io::IoSlice::new(&client_id_bytes),
-        std::io::IoSlice::new(&packet.data),
-    ];
+    let mut combined_message = Vec::with_capacity(4 + 8 + packet.data.len());
+    combined_message.extend_from_slice(&size_bytes);
+    combined_message.extend_from_slice(&client_id_bytes);
+    combined_message.extend_from_slice(&packet.data);
 
-    let n = stream.write_vectored(&bufs).await?;
-    assert_eq!(n, size as usize + 4);
+    write_all_cancel_safe(stream, &combined_message).await?;
 
     Ok(())
 }
