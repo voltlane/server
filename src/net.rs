@@ -9,6 +9,7 @@ pub fn configure_performance_tcp_socket(
     stream: &mut TcpStream,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     stream.set_nodelay(true)?;
+    stream.set_linger(Some(std::time::Duration::from_secs(5)))?;
     Ok(())
 }
 
