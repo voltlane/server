@@ -24,6 +24,7 @@ use tokio::{
     },
 };
 
+/// Configures a TCP socket for performance by setting relevant socket options.
 pub fn configure_performance_tcp_socket(
     stream: &mut TcpStream,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -53,6 +54,12 @@ async fn peek_all(
     Ok(())
 }
 
+/// Receives a size-prefixed message.
+///
+/// # Cancellation Safety
+///
+/// This method IS cancellation safe. It peeks the data until it knows that enough data is available,
+/// and then reads it in a cancellation safe way.
 pub async fn recv_size_prefixed(
     stream: &mut OwnedReadHalf,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
