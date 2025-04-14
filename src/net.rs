@@ -10,7 +10,9 @@
 //! where needed.
 //!
 //! If you want to touch this, read up on cancellation safety in Rust and the Tokio documentation, first.
-//! Then, grab a <drink of choice>, block a time slot of a few hours, and enjoy yourself. NOTE(lion): Ahhhhhhhh!.
+//! Then, grab a {drink_of_choice}, block a time slot of a few hours, and enjoy yourself.
+//! Finally, make sure you can explain why the code is the way it is before you change it. And please, don't
+//! assume that it was ever correct; so if you find a bug, it's probably real.
 //!
 use crate::Packet;
 use tokio::{
