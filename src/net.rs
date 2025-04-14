@@ -1,9 +1,26 @@
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
-
+//! HERE BE DRAGONS, IF YOU TOUCH THIS CODE YOU WILL BE CURSED
+//!
+//! This module provides utilities for working with TCP sockets in an asynchronous context using Tokio.
+//! It handles sending and receiving size-prefixed messages and packets with client IDs. The module
+//! ensures cancellation safety where applicable, allowing for robust handling of asynchronous operations.
+//!
+//! If you call ANYTHING from this module, make SURE to read the notes about cancellation safety in each
+//! doc comment. If you don't, you will be cursed and your code will be haunted by the ghosts of the braincells
+//! who had to die in the tens of hours of work debugging and testing this code to make sure it's cancellation safe
+//! where needed.
+//!
+//! If you want to touch this, read up on cancellation safety in Rust and the Tokio documentation, first.
+//! Then, grab a <drink of choice>, block a time slot of a few hours, and enjoy yourself. NOTE(lion): Ahhhhhhhh!.
+//!
 use crate::Packet;
+use tokio::{
+    io::AsyncReadExt as _,
+    io::AsyncWriteExt as _,
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream,
+    },
+};
 
 pub fn configure_performance_tcp_socket(
     stream: &mut TcpStream,
@@ -13,51 +30,70 @@ pub fn configure_performance_tcp_socket(
     Ok(())
 }
 
-async fn read_exact_cancel_safe<A: AsyncReadExt + std::marker::Unpin>(
-    stream: &mut A,
+/// Peeks all data from the stream until the buffer is filled.
+///
+/// # Cancellation Safety
+///
+/// This method IS cancellation safe, however it does not commit the read
+/// it performs. The caller must commit the read later to "confirm" it.
+async fn peek_all(
+    stream: &mut OwnedReadHalf,
     buf: &mut [u8],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut total_read = 0;
     while total_read < buf.len() {
-        let bytes_read = stream.read(&mut buf[total_read..]).await?;
-        if bytes_read == 0 {
+        let read = stream.peek(&mut buf[total_read..]).await?;
+        if read == 0 {
             return Err("Connection closed or Eof".into());
         }
-        total_read += bytes_read;
+        total_read += read;
     }
     Ok(())
 }
 
-async fn write_all_cancel_safe<A: AsyncWriteExt + std::marker::Unpin>(
-    stream: &mut A,
-    buf: &[u8],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut total_written = 0;
-    while total_written < buf.len() {
-        let bytes_written = stream.write(&buf[total_written..]).await?;
-        if bytes_written == 0 {
-            return Err("Connection closed or Eof".into());
-        }
-        total_written += bytes_written;
-    }
-    Ok(())
-}
-
-pub async fn recv_size_prefixed<A: AsyncReadExt + std::marker::Unpin>(
-    stream: &mut A,
+pub async fn recv_size_prefixed(
+    stream: &mut OwnedReadHalf,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let mut size_buf = [0u8; 4];
-    read_exact_cancel_safe(stream, &mut size_buf).await?;
+    // NOTE(lion): peek here to make sure we can get cancelled in the next read
+    // without violating cancel safety
+    peek_all(stream, &mut size_buf).await?;
 
     let size = u32::from_be_bytes(size_buf) as usize;
-    let mut buf = vec![0u8; size];
-    read_exact_cancel_safe(stream, &mut buf).await?;
+    if size == 0 {
+        return Err("Packet too small".into());
+    }
+
+    // NOTE(lion): we need to peek the size + 4 bytes for the size itself,
+    // because we need to read the size and the data in a cancellation safe way
+    // otherwise we could read the size and then get cancelled before reading
+    // the data, which would leave us with a partial read
+    let mut buf = vec![0u8; size + 4];
+    peek_all(stream, &mut buf).await?;
+
+    let n = stream.read(&mut buf).await?;
+    if n == 0 {
+        return Err("Connection closed or Eof".into());
+    }
+    if n != buf.len() {
+        return Err("Partial read".into());
+    }
+
+    // NOTE(lion): we need to remove the size bytes from the buffer
+    // because we only want the data. We need to avoid a copy here, too
+    // because we don't want to allocate a new buffer.
+    buf.drain(..4);
 
     Ok(buf)
 }
 
-pub async fn send_size_prefixed<A: AsyncWriteExt + std::marker::Unpin>(
-    stream: &mut A,
+/// Sends a size-prefixed message.
+///
+/// # Cancellation Safety
+///
+/// This method is NOT cancellation safe.s
+pub async fn send_size_prefixed(
+    stream: &mut OwnedWriteHalf,
     message: &[u8],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let size = message.len() as u32;
@@ -65,12 +101,18 @@ pub async fn send_size_prefixed<A: AsyncWriteExt + std::marker::Unpin>(
     let mut combined_message = Vec::with_capacity(4 + message.len());
     combined_message.extend_from_slice(&size_bytes);
     combined_message.extend_from_slice(message);
-    write_all_cancel_safe(stream, &combined_message).await?;
+    stream.write_all(&combined_message).await?;
     Ok(())
 }
 
-pub async fn recv_packet<A: AsyncReadExt + std::marker::Unpin>(
-    stream: &mut A,
+/// Receives a packet with a client id.
+///
+/// # Cancellation Safety
+///
+/// This method IS cancellation safe. It peeks the data until it knows that enough data is available,
+/// and then reads it in a cancellation safe way.
+pub async fn recv_packet(
+    stream: &mut OwnedReadHalf,
 ) -> Result<Packet, Box<dyn std::error::Error + Send + Sync>> {
     let data = recv_size_prefixed(stream).await?;
     if data.len() < 8 {
@@ -85,8 +127,13 @@ pub async fn recv_packet<A: AsyncReadExt + std::marker::Unpin>(
     })
 }
 
-pub async fn send_packet<A: AsyncWriteExt + std::marker::Unpin>(
-    stream: &mut A,
+/// Sends a packet with a client id.
+///
+/// # Cancellation Safety
+///
+/// This method is NOT cancellation safe.
+pub async fn send_packet(
+    stream: &mut OwnedWriteHalf,
     packet: Packet,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let size = packet.data.len() as u32 + 8;
@@ -98,7 +145,6 @@ pub async fn send_packet<A: AsyncWriteExt + std::marker::Unpin>(
     combined_message.extend_from_slice(&client_id_bytes);
     combined_message.extend_from_slice(&packet.data);
 
-    write_all_cancel_safe(stream, &combined_message).await?;
-
+    stream.write_all(&combined_message).await?;
     Ok(())
 }
