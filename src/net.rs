@@ -84,7 +84,7 @@ pub async fn recv_size_prefixed(
         return Err("Connection closed or Eof".into());
     }
     if n != buf.len() {
-        return Err("Partial read".into());
+        return Err(format!("Partial read, expected {} got {} byte(s)", buf.len(), n).into());
     }
 
     // NOTE(lion): we need to remove the size bytes from the buffer
