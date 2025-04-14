@@ -134,8 +134,8 @@ async fn multi_client_echo() -> Result<(), Box<dyn std::error::Error + Send + Sy
 
     let mut id_gen = IdGenerator::new();
 
-    let (master_send_sender, master_send_receiver) = mpsc::channel::<Msg>(4096);
-    let (master_recv_sender, mut master_recv_receiver) = mpsc::channel::<Msg>(4096);
+    let (master_send_sender, master_send_receiver) = mpsc::channel::<Msg>(32_768);
+    let (master_recv_sender, mut master_recv_receiver) = mpsc::channel::<Msg>(32_768);
 
     tokio::spawn({
         async move {
@@ -192,7 +192,7 @@ async fn multi_client_echo() -> Result<(), Box<dyn std::error::Error + Send + Sy
         let client_id = id_gen.next_id();
         info!("Accepted client connection id={}", client_id);
         // these are messages from master to client
-        let (client_sender, client_receiver) = mpsc::channel::<Msg>(1024);
+        let (client_sender, client_receiver) = mpsc::channel::<Msg>(8_192);
         {
             clients.lock().await.insert(client_id, client_sender);
         }
