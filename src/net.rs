@@ -45,11 +45,10 @@ async fn peek_all(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut total_read = 0;
     while total_read < buf.len() {
-        let read = stream.peek(buf).await?;
-        if read == 0 {
+        total_read = stream.peek(buf).await?;
+        if total_read == 0 {
             return Err("Connection closed or Eof".into());
         }
-        total_read += read;
     }
     Ok(())
 }
