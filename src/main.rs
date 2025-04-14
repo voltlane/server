@@ -11,23 +11,6 @@ mod args;
 mod ids;
 mod net;
 
-async fn simple_master_echo() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut master = TcpStream::connect(("127.0.0.1", 42001)).await?;
-    net::configure_performance_tcp_socket(&mut master)?;
-
-    let acceptor = TcpListener::bind(("0.0.0.0", 42000)).await?;
-    info!("Listening on {}", acceptor.local_addr()?);
-
-    let (mut client, _) = acceptor.accept().await?;
-    net::configure_performance_tcp_socket(&mut client)?;
-    loop {
-        let msg = net::recv_size_prefixed(&mut client).await?;
-        net::send_size_prefixed(&mut master, &msg).await?;
-        let msg = net::recv_size_prefixed(&mut master).await?;
-        net::send_size_prefixed(&mut client, &msg).await?;
-    }
-}
-
 #[derive(Clone)]
 struct Packet {
     client_id: u64,
