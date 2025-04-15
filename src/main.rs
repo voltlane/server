@@ -30,14 +30,14 @@ async fn handle_socket_duplex_slave(
     client_id: u64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (mut read, mut write) = socket.into_split();
+    let mut buffer = Vec::new();
     loop {
         tokio::select! {
-            msg = net::recv_size_prefixed(&mut read) => {
-                info!("Slave: Received TCP packet as client {} with packet id {:?}", client_id, msg.as_ref().map(|m| m.len()));
-                match msg {
-                    Ok(msg) => {
-                        if let Err(e) = recv_sender.send(Msg::Data(Packet { client_id, data: msg.clone() })).await {
-                            error!("Slave: Error sending message for client {} with packet id {:?}: {}", client_id, msg.len(), e);
+            res = net::recv_size_prefixed(&mut read, &mut buffer) => {
+                match res {
+                    Ok(()) => {
+                        if let Err(e) = recv_sender.send(Msg::Data(Packet { client_id, data: buffer.clone() })).await {
+                            error!("Slave: Error sending message for client {}: {}", client_id, e);
                             return Err(e.into());
                         }
                     }
@@ -50,7 +50,6 @@ async fn handle_socket_duplex_slave(
             Some(msg) = send_receiver.recv() => {
                 match msg {
                     Msg::Data(packet) => {
-                        info!("Slave: Sending TCP packet for client {} with packet id {:?}, as client {}", packet.client_id, packet.data.len(), client_id);
                         if let Err(e) = net::send_size_prefixed(&mut write, &packet.data).await {
                             error!("Slave: Error sending message for client {} with packet id {:?}: {}", client_id, packet.data.len(), e);
                             return Err(e.into());
@@ -73,12 +72,12 @@ async fn handle_socket_duplex_master(
     recv_sender: mpsc::Sender<Msg>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (mut read, mut write) = socket.into_split();
+    let mut buffer = Vec::new();
     loop {
         tokio::select! {
-            packet = net::recv_packet(&mut read) => {
+            packet = net::recv_packet(&mut read, &mut buffer) => {
                 match packet {
                     Ok(packet) => {
-                        info!("Master: Received TCP packet for client {} with packet id {:?}", packet.client_id, packet.data.len());
                         if let Err(e) = recv_sender.send(Msg::Data(packet.clone())).await {
                             panic!("Master: Error sending message for client {}: {}", packet.client_id, e);
                         }
@@ -92,7 +91,6 @@ async fn handle_socket_duplex_master(
             Some(msg) = send_receiver.recv() => {
                 match msg {
                     Msg::Data(packet) => {
-                        info!("Master: Sending TCP packet for client {} with packet id {:?}", packet.client_id, packet.data.len());
                         if let Err(e) = net::send_packet(&mut write, packet.clone()).await {
                             panic!("Master: Error sending message for client {}: {}", packet.client_id, e);
                         }

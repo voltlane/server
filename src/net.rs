@@ -61,7 +61,8 @@ async fn peek_all(
 /// and then reads it in a cancellation safe way.
 pub async fn recv_size_prefixed(
     stream: &mut OwnedReadHalf,
-) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    buffer: &mut Vec<u8>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut size_buf = [0u8; 4];
     // NOTE(lion): peek here to make sure we can get cancelled in the next read
     // without violating cancel safety
@@ -76,23 +77,24 @@ pub async fn recv_size_prefixed(
     // because we need to read the size and the data in a cancellation safe way
     // otherwise we could read the size and then get cancelled before reading
     // the data, which would leave us with a partial read
-    let mut buf = vec![0u8; size + 4];
-    peek_all(stream, &mut buf).await?;
+    buffer.reserve(size + 4);
+    unsafe { buffer.set_len(size + 4); }
+    peek_all(stream, buffer).await?;
 
-    let n = stream.read(&mut buf).await?;
+    let n = stream.read(buffer).await?;
     if n == 0 {
         return Err("Connection closed or Eof".into());
     }
-    if n != buf.len() {
-        return Err(format!("Partial read, expected {} got {} byte(s)", buf.len(), n).into());
+    if n != buffer.len() {
+        return Err(format!("Partial read, expected {} got {} byte(s)", buffer.len(), n).into());
     }
 
     // NOTE(lion): we need to remove the size bytes from the buffer
     // because we only want the data. We need to avoid a copy here, too
     // because we don't want to allocate a new buffer.
-    buf.drain(..4);
+    buffer.drain(..4);
 
-    Ok(buf)
+    Ok(())
 }
 
 /// Sends a size-prefixed message.
@@ -121,13 +123,14 @@ pub async fn send_size_prefixed(
 /// and then reads it in a cancellation safe way.
 pub async fn recv_packet(
     stream: &mut OwnedReadHalf,
+    buffer: &mut Vec<u8>,
 ) -> Result<Packet, Box<dyn std::error::Error + Send + Sync>> {
-    let data = recv_size_prefixed(stream).await?;
-    if data.len() < 8 {
+    recv_size_prefixed(stream, buffer).await?;
+    if buffer.len() < 8 {
         return Err("Packet too small".into());
     }
-    let client_id = u64::from_be_bytes(data[0..8].try_into().unwrap());
-    let buf = data[8..].into();
+    let client_id = u64::from_be_bytes(buffer[0..8].try_into().unwrap());
+    let buf = buffer[8..].into();
 
     Ok(Packet {
         client_id,
