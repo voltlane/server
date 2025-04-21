@@ -21,12 +21,12 @@ You're building a product which needs `N` connections; an IoT app, a multiplayer
 - Cryptographically secure **re**connects: Reconnecting users are validated by solving a challenge via ECDH (k256) + XChaCha20-Poly1305 encryption.
 - Packets to- and from Voltlane are tagged with unique client IDs to keep server code simple
 - Fully configurable parameters, including DDoS protection
+- Option to buffer missed packets while waiting for clients to reconnect
 
 ### What's the catch?
 
 **Voltlane** is:
 - NOT a load-balancer (yet)
-- NOT a session manager—your app has to still handle what happens after a successful reconnect, voltlane only guarantees that it's the same client. Clients which lose connection WILL miss messages.
 - NOT a source of truth for your app (that's still your backend-/master-server)
 - NOT an authentication service—you will still need auth.
 - NOT a cryptographically secure data stream—you have to provide encryption of your streams (for now)
