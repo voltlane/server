@@ -1,6 +1,9 @@
 use tokio::net::{tcp::OwnedReadHalf, TcpStream};
 use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
 
+pub use enc;
+pub use net;
+
 pub struct Connection {
     pub read: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
     pub write: tokio::net::tcp::OwnedWriteHalf,

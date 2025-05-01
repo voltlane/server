@@ -1,8 +1,6 @@
-use std::time::Duration;
 
 use net::TaggedPacket;
 use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,13 +22,6 @@ async fn main() -> anyhow::Result<()> {
                     }
                 };
                 println!("Received data: {:?}", packet);
-
-                let mut line = String::new();
-                std::io::stdin().read_line(&mut line).unwrap();
-                let packet = TaggedPacket::Data {
-                    client_id: packet.client_id(),
-                    data: line.into_bytes(),
-                };
 
                 // Echo the data back to the client
                 if let Err(err) = net::send_tagged_packet(&mut write, packet).await {
