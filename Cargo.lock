@@ -895,16 +895,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "servercom"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "enc",
- "net",
- "tokio",
-]
-
-[[package]]
 name = "sha2"
 version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
