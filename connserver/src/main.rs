@@ -1,4 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use connection::stale::{StaleClient, StaleConnectionManager};
 use ids::IdGenerator;
@@ -25,14 +31,12 @@ enum Msg {
 }
 
 struct ConnServer {
-    keys: Arc<enc::easy::Keys>,
     config: config::Config,
 }
 
 impl ConnServer {
     async fn new(config: config::Config) -> Self {
-        let keys = Arc::new(enc::easy::Keys::new());
-        ConnServer { keys, config }
+        ConnServer { config }
     }
 
     async fn run(&mut self) -> anyhow::Result<()> {
@@ -43,6 +47,7 @@ impl ConnServer {
         info!("Listening on {}", acceptor.local_addr()?);
 
         let keys = Arc::new(enc::easy::Keys::new());
+        let dead = Arc::new(AtomicBool::new(false));
 
         let id_gen = Arc::new(Mutex::new(IdGenerator::new()));
 
@@ -53,7 +58,11 @@ impl ConnServer {
 
         let (removed_sender, removed_receiver) = mpsc::channel(2);
 
+        let clients = Arc::new(Mutex::new(HashMap::<u64, mpsc::Sender<Msg>>::new()));
+        let stale_conn_manager = StaleConnectionManager::new(self.config.clone());
+
         tokio::spawn({
+            let dead = dead.clone();
             async move {
                 if let Err(e) = handle_socket_duplex_master(
                     master,
@@ -64,12 +73,11 @@ impl ConnServer {
                 .await
                 {
                     error!("Error handling master duplex: {}", e);
+                    error!("FATAL: Master server is down, exiting to fail hard");
+                    dead.store(true, Ordering::Relaxed);
                 }
             }
         });
-
-        let clients = Arc::new(Mutex::new(HashMap::<u64, mpsc::Sender<Msg>>::new()));
-        let stale_conn_manager = StaleConnectionManager::new(self.config.clone());
 
         tokio::spawn(stale_conn_manager.clone().run_cleanup(removed_sender));
 
@@ -93,7 +101,7 @@ impl ConnServer {
             }
         });
 
-        loop {
+        while !dead.load(Ordering::Relaxed) {
             if let Err(err) = self
                 .accept_client(
                     &acceptor,
@@ -108,6 +116,22 @@ impl ConnServer {
                 error!("Failed accepting client: {}", err);
             }
         }
+        info!("Stopping server");
+        let clients = clients.lock().await;
+        let mut tmp = clients.values();
+        while let Some(client_sender) = tmp.next() {
+            if let Err(e) = client_sender.send(Msg::Stop).await {
+                error!("Error sending stop message to client: {}", e);
+            }
+        }
+        if let Err(e) = master_send_sender.send(Msg::Stop).await {
+            error!("Error sending stop message to master: {}", e);
+        }
+        // NOTE(lion): This is a bad situation, and most likely the master server is down.
+        // We should never reach this point, but if we do, we should exit with an error, so that any sane
+        // monitoring system can pick it up and restart the server, and hopefully the master-server too.
+        info!("Assuming this server should never go down, shutting down is considered an error, but something forced this server to shut down (probably an error)");
+        Err(anyhow::format_err!("Unexpected server shutdown"))
     }
 
     async fn accept_client(
@@ -119,7 +143,15 @@ impl ConnServer {
         stale_conn_manager: StaleConnectionManager,
         id_gen: &Arc<Mutex<IdGenerator>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let (mut client, _) = acceptor.accept().await?;
+        let (mut client, _) = match tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            acceptor.accept(),
+        )
+        .await
+        {
+            Ok(res) => res?,
+            Err(_) => return Ok(()),
+        };
         net::configure_performance_tcp_socket(&mut client)?;
 
         let client_id = id_gen.lock().await.next_id();
@@ -132,7 +164,10 @@ impl ConnServer {
         let (client_sender, client_receiver) =
             mpsc::channel::<Msg>(self.config.clients.channel_capacity);
         {
-            clients.lock().await.insert(client_id, client_sender.clone());
+            clients
+                .lock()
+                .await
+                .insert(client_id, client_sender.clone());
         }
         tokio::spawn({
             let master_send_sender = master_send_sender.clone();
@@ -187,18 +222,21 @@ async fn handle_socket_duplex_slave(
             Some(msg) = send_receiver.recv() => {
                 match msg {
                     Msg::Data(packet) => {
-                        if let TaggedPacket::Data { client_id: id, data } = packet {
-                            if id != client_id {
-                                error!("Slave: Received message for client {} but expected {}", id, client_id);
+                        match packet {
+                            TaggedPacket::Data { client_id: id, data } => {
+                                if id != client_id {
+                                    error!("Slave: Received message for client {} but expected {}", id, client_id);
+                                    continue;
+                                }
+                                if let Err(e) = net::send_size_prefixed(write, &data).await {
+                                    error!("Slave: Error sending message for client {}: {}", client_id, e);
+                                    return Err(e.into());
+                                }
+                            }
+                            _ => {
+                                error!("Slave: Unexpected packet type from master: {:?}", packet);
                                 continue;
                             }
-                            if let Err(e) = net::send_size_prefixed(write, &data).await {
-                                error!("Slave: Error sending message for client {}: {}", client_id, e);
-                                return Err(e.into());
-                            }
-                        } else {
-                            error!("Slave: Unexpected packet type from master: {:?}", packet);
-                            continue;
                         }
                     }
                     Msg::Stop => {

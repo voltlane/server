@@ -1,8 +1,8 @@
-use log::{debug, info};
+use log::{debug, error, info};
 use net::TaggedPacket;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{
-    mpsc::{Receiver, Sender},
+    mpsc::Sender,
     Mutex, RwLock,
 };
 
@@ -88,7 +88,9 @@ impl StaleConnectionManager {
         loop {
             let removed = self.cleanup().await;
             if !removed.is_empty() {
-                on_remove.send(removed).await.unwrap();
+                if let Err(e) = on_remove.send(removed).await {
+                    error!("Failed to send removed clients: {}", e);
+                }
             }
             tokio::time::sleep(std::time::Duration::from_secs(
                 self.inner.config.clients.stale_reap_interval_secs,
