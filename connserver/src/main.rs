@@ -194,7 +194,7 @@ impl ConnServer {
     }
 }
 
-async fn handle_socket_duplex_slave(
+async fn handle_socket_duplex_client(
     read: &mut net::FramedReader<OwnedReadHalf>,
     write: &mut OwnedWriteHalf,
     mut send_receiver: mpsc::Receiver<Msg>,
@@ -206,15 +206,15 @@ async fn handle_socket_duplex_slave(
             res = net::recv_size_prefixed(read) => {
                 match res {
                     Ok(buffer) => {
-                        debug!("Slave: Received data for client {}: {:?}", client_id, buffer);
+                        debug!("Client: Received data for client {}: {:?}", client_id, buffer);
                         if let Err(e) = recv_sender.send(Msg::Data(TaggedPacket::Data { client_id, data: buffer.to_vec() })).await {
-                            error!("Slave: Error sending message for client {}: {}", client_id, e);
+                            error!("Client: Error sending message for client {}: {}", client_id, e);
                             return Err(e.into());
                         }
-                        debug!("Slave: Sent data to master for client {}: {:?}", client_id, buffer);
+                        debug!("Client: Sent data to master for client {}: {:?}", client_id, buffer);
                     }
                     Err(e) => {
-                        error!("Slave: Error receiving packet for client {}: {}", client_id, e);
+                        error!("Client: Error receiving packet for client {}: {}", client_id, e);
                         return Err(e.into());
                     }
                 }
@@ -225,22 +225,22 @@ async fn handle_socket_duplex_slave(
                         match packet {
                             TaggedPacket::Data { client_id: id, data } => {
                                 if id != client_id {
-                                    error!("Slave: Received message for client {} but expected {}", id, client_id);
+                                    error!("Client: Received message for client {} but expected {}", id, client_id);
                                     continue;
                                 }
                                 if let Err(e) = net::send_size_prefixed(write, &data).await {
-                                    error!("Slave: Error sending message for client {}: {}", client_id, e);
+                                    error!("Client: Error sending message for client {}: {}", client_id, e);
                                     return Err(e.into());
                                 }
                             }
                             _ => {
-                                error!("Slave: Unexpected packet type from master: {:?}", packet);
+                                error!("Client: Unexpected packet type from master: {:?}", packet);
                                 continue;
                             }
                         }
                     }
                     Msg::Stop => {
-                        info!("Stopping slave duplex for client {}", client_id);
+                        info!("Stopping client duplex for client {}", client_id);
                         break;
                     }
                 }
@@ -561,7 +561,7 @@ async fn handle_client(
         clients.insert(client_id, client_sender);
         id_gen.lock().await.release_id(client_id_before);
     }
-    if let Err(e) = handle_socket_duplex_slave(
+    if let Err(e) = handle_socket_duplex_client(
         &mut read,
         &mut write,
         client_receiver,
