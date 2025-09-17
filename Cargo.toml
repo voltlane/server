@@ -1,10 +1,10 @@
-[workspace]
-members = ["connserver", "enc", "net", "clientcom", "clientcom-c", "servercom"]
-resolver = "2"
+[package]
+name = "servercom"
+version = "0.1.0"
+edition = "2024"
 
-[profile.release-with-debug]
-opt-level = 3
-debug = true
-lto = true
-panic = "abort"
-inherits = "release"
+[dependencies]
+anyhow = "1.0.98"
+voltlane-net = "0.1.0"
+thiserror = "2.0.12"
+tokio = "1.44.2"

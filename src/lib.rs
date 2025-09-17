@@ -1,7 +1,7 @@
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use std::future::Future;
-use net;
+use voltlane_net as net;
 
 pub trait MasterServer {
     fn handle_packet(

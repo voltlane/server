@@ -1,3 +1,0 @@
-[workspace]
-members = ["echoserver", "test-client", "test-client2"]
-resolver = "2"
