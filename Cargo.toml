@@ -1,9 +1,9 @@
 [package]
-name = "servercom"
+name = "voltlane-server"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Voltlane server-side library to communicate with the standard Voltlane TCP server."
+description = "Voltlane server-side library to communicate with the standard Voltlane TCP reverse proxy."
 repository = "https://github.com/voltlane/servercom"
 homepage = "https://voltlane.net"
 

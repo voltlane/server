@@ -289,16 +289,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "servercom"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "thiserror",
- "tokio",
- "voltlane-net",
-]
-
-[[package]]
 name = "slab"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -416,6 +406,16 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+]
+
+[[package]]
+name = "voltlane-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "thiserror",
+ "tokio",
+ "voltlane-net",
 ]
 
 [[package]]
