@@ -2,6 +2,10 @@
 name = "servercom"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Voltlane server-side library to communicate with the standard Voltlane TCP server."
+repository = "https://github.com/voltlane/servercom"
+homepage = "https://voltlane.net"
 
 [dependencies]
 anyhow = "1.0.98"
